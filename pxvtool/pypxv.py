@@ -24,31 +24,6 @@ import aiohttp
 #---------------------------------------------------------------------------#
 
 #---------------------------------------------------------------------------#
-#   Tests:                                                                  #
-#       metadata parser test ok                                             #
-#       download test ok                                                    #
-#---------------------------------------------------------------------------#
-
-#---------------------------------------------------------------------------#
-#   Progress:                                                               #
-#       180822:                                                             #
-#           Complete metadata fetching, not tested.                         #
-#           Metadata parser test complete.                                  #
-#           Complete download function, not tested.                         #
-#           Download functions test complete.                               #
-#---------------------------------------------------------------------------#
-
-#---------------------------------------------------------------------------#
-#   TODO                                                                    #
-#       Flexible log directory                                              #
-#           Dynamically add filehandler and remove with                     #
-#           'logger.removeHandler'.                                         #
-#       Use enum to replace string mode selection                           #
-#           The data specification is different from modes to modes.        #
-#---------------------------------------------------------------------------#
-
-
-#---------------------------------------------------------------------------#
 #   Constants and generic objects                                           #
 #---------------------------------------------------------------------------#
 
@@ -109,6 +84,8 @@ PREFORGE_HEADERS = {
     "User-Agent": USER_AGENT,
 }
 
+#   Too many concurrent connection may cause you cut from server.
+#   This value is safe for now.
 SEM_LIMIT = 5
 
 _logstrfmt = "{asctime}|{name}|{levelname:^7s}| {message}"
@@ -224,6 +201,7 @@ def _make_illust_meta(content):
 
     pat_mid, pat_suf = _pattern_table[illust_type]
 
+    #   These name may somehow confusing.
     url = pat_mid.sub(
         _origin_mid[illust_type], url
     )
@@ -255,16 +233,6 @@ def _make_sample_url(meta, ext):
     sample = meta.template_url.format(illust_id=meta.illust_id, page=0)
     sample += f".{ext}"
     return sample
-
-
-#---------------------------------------------------------------------------#
-#   Date processing                                                         #
-#---------------------------------------------------------------------------#
-
-#   The rule of specifying certain date for ranking varies from "modes",
-#   hence it is necessary to handle date checking and generating case by case.
-
-#   Put code here.
 
 
 #---------------------------------------------------------------------------#

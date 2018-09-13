@@ -1,4 +1,5 @@
 from .pypxv import *
+
 __version__ = "2.0.6"
 __all__ = [
     "fetch_ranking_info",

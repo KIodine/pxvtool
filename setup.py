@@ -6,9 +6,9 @@ Pixiv ranking and spotlight download tool.\
 
 setup(
     name="pxvtool",
-    version="2.0.5",
+    version="2.0.6",
     description=desc,
-    author="337",
+    author="KIodine",
     license="MIT",
     packages=["pxvtool"],
     python_requires=">=3.6",
