@@ -7,12 +7,18 @@
 #---------------------------------------------------------------------------#
 #   Improve Proposals                                                       #
 #---------------------------------------------------------------------------#
+#   New function                                                            #
+#       fetch_spotlight_list:                                               #
+#                                                                           #
+#   Modify "_json_fetcher/_json_dispatcher" for more general purpose        #
+#       -no further description-                                            #
+#                                                                           #
 #   Flexible logger                                                         #
 #       add filehandler and remove with                                     #
 #       'logger.removeHandler'.                                             #
 #                                                                           #
 #   Use enum to replace string mode selection                               #
-#       --no further description--                                          #
+#       Providing mode listing and lint compatibility.                      #
 #                                                                           #
 #   Move enum class to the top of code                                      #
 #       --no further description--                                          #

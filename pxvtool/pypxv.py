@@ -27,6 +27,22 @@ import aiohttp
 #   Constants and generic objects                                           #
 #---------------------------------------------------------------------------#
 
+
+class _StrEnum(str, enum.Enum):
+    pass
+
+
+class IllustType(_StrEnum):
+    ILLUST = "0"
+    MANGA = "1"
+    UGOIRA = "2"
+
+
+class HTTPStatus(enum.IntEnum):
+    OK = 200
+    NOT_FOUND = 404
+
+
 RANKING = "https://www.pixiv.net/ranking.php"
 SPOTLIGHT = "https://www.pixiv.net/ajax/showcase/article"
 
@@ -110,16 +126,6 @@ _pxvroot.addHandler(_file_hdl)
 pxlog = _pxvroot    #   Alias
 
 
-class _StrEnum(str, enum.Enum):
-    pass
-
-
-class IllustType(_StrEnum):
-    ILLUST = "0"
-    MANGA = "1"
-    UGOIRA = "2"
-
-
 _thumbnail_suffix = r"p0_master1200\..*"
 _thumbnail_suffix_sc = r"master1200\..*"
 _thumbnail_middle = r"c/\d+x\d+(_\d*)?/img-master"
@@ -157,11 +163,6 @@ _sem = asyncio.Semaphore(SEM_LIMIT)
 #---------------------------------------------------------------------------#
 #   Metadata structure and enums                                            #
 #---------------------------------------------------------------------------#
-
-
-class HTTPStatus(enum.IntEnum):
-    OK = 200
-    NOT_FOUND = 404
 
 
 _illust_meta_fields = [
@@ -267,6 +268,30 @@ def fetch_spotlight_info(feature):
     pxlog.info("Fetching spotlight info ok")
     return content
 
+def fetch_spotlight_list(article_num=17, pages=1):
+    content = dict()
+    pxlog.info(
+        "Start fetching spotlight list {}/page (total: {})".format(
+            article_num, article_num * pages
+        )
+    )
+    texts = _loop.run_until_complete(
+        _spotlight_list_dispatcher(article_num, pages)
+    )
+    
+    for t in texts:
+        if content:
+            content["body"].extend(
+                json.loads(t, encodong="utf-8")["body"]
+            )
+        else:
+            content = json.loads(t, encoding="utf-8")
+
+    pxlog.info(
+        "Fetch spotlight list info ok"
+    )
+    return content
+
 def download_spotlight(
         feature,
         *,
@@ -362,6 +387,51 @@ async def _spotlight_fetcher(feature):
             loop=_loop, headers=PREFORGE_HEADERS, raise_for_status=True
         ) as client:
         async with client.get(SPOTLIGHT, params=query) as resp:
+            text = await resp.text()
+    return text
+
+async def _spotlight_list_dispatcher(article_num, pages):
+    #   if page is out of range, received article will less than article_num.
+    texts = []
+    #   make "header_set"?
+    headers = {
+        "Host": "www.pixiv.net",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:62.0) "
+            "Gecko/20100101 Firefox/62.0"
+        ),
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "zh-TW,en-US;q=0.7,en;q=0.3",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://www.pixiv.net/showcase/",
+    }
+
+    url = (
+        "https://www.pixiv.net/ajax/showcase/latest"
+    )
+    queries = [
+        {"page": i, "article_num": article_num}
+        for i in range(1, pages+1)
+    ]
+    async with aiohttp.ClientSession(
+            loop=_loop, headers=headers
+        ) as client:
+        try:
+            tasks = [
+                _showcase_list_fetcher(client, url, q)
+                for q in queries
+            ]
+            gat = asyncio.gather(*tasks, loop=_loop)
+            texts = await gat
+        except Exception:
+            gat.cancel()
+            raise
+    return texts
+
+async def _showcase_list_fetcher(client, url, query):
+    async with _sem:
+        await asyncio.sleep(random.random() * 0.7 + 0.3, loop=_loop)
+        async with client.get(url, params=query) as resp:
             text = await resp.text()
     return text
 

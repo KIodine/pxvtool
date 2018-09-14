@@ -1,3 +1,4 @@
 /pxvtool/pixiv_image/*
 /pxvtool/__pycache__/*
 *.log
+*.har
