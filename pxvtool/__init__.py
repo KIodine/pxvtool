@@ -1,6 +1,6 @@
 from .pypxv import *
 
-__version__ = "2.1.0"
+__version__ = "1.1.0"
 __all__ = [
     "fetch_ranking_info",
     "fetch_spotlight_info",
