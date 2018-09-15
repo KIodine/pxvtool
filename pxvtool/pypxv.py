@@ -43,8 +43,9 @@ class HTTPStatus(enum.IntEnum):
     NOT_FOUND = 404
 
 
-RANKING = "https://www.pixiv.net/ranking.php"
+RANKING_URL = "https://www.pixiv.net/ranking.php"
 SPOTLIGHT = "https://www.pixiv.net/ajax/showcase/article"
+SPOTLIGHT_QUERY_URL = "https://www.pixiv.net/ajax/showcase/latest"
 
 UGOIRA_META_template = "https://www.pixiv.net/ajax/illust/{:8d}/ugoira_meta"
 
@@ -90,12 +91,12 @@ COMMON_EXTS = ["jpg", "png", "gif", "bmp", "zip"]
 REFERER = (
     "https://www.pixiv.net/member_illust.php?"
     "mode=medium&illust_id="
-    )
+)
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/63.0.3239.132 Safari/537.36"
-    )
+)
 PREFORGE_HEADERS = {
     "User-Agent": USER_AGENT,
 }
@@ -252,7 +253,9 @@ def fetch_ranking_info(date="", mode="daily", content="", pages=-1):
         date, mode, content, pages
     )
     pxlog.info(f"Start fetching ranking {date} info")
-    coro = _json_dispatcher(queries)
+    coro = _query_dispatcher(
+        RANKING_URL, queries, headers=PREFORGE_HEADERS
+    )
     texts = _loop.run_until_complete(coro)
     content = _merge_json(texts)
     pxlog.info("Fetching ranking info ok")
@@ -264,7 +267,7 @@ def fetch_spotlight_info(feature):
     text = _loop.run_until_complete(
         _spotlight_fetcher(feature)
     )
-    content.update(json.loads(text, encoding="utf-8"))
+    content = json.loads(text, encoding="utf-8")
     pxlog.info("Fetching spotlight info ok")
     return content
 
@@ -275,8 +278,25 @@ def fetch_spotlight_list(article_num=17, pages=1):
             article_num, article_num * pages
         )
     )
+    #   Add a global header_set?
+    headers = {
+        "Host": "www.pixiv.net",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:62.0) "
+            "Gecko/20100101 Firefox/62.0"
+        ),
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "zh-TW,en-US;q=0.7,en;q=0.3",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://www.pixiv.net/showcase/",
+    }
+    queries = [
+        {"page": i, "article_num": article_num}
+        for i in range(1, pages+1)
+    ]
+
     texts = _loop.run_until_complete(
-        _spotlight_list_dispatcher(article_num, pages)
+        _query_dispatcher(SPOTLIGHT_QUERY_URL, queries, headers=headers)
     )
     
     for t in texts:
@@ -353,32 +373,11 @@ def _download(taskname, metadatas, fullpath):
     )
     return downloaded
 
+
 #---------------------------------------------------------------------------#
 #   Precedures                                                              #
 #---------------------------------------------------------------------------#
 
-async def _json_dispatcher(queries):
-    async with aiohttp.ClientSession(
-            loop=_loop, headers=PREFORGE_HEADERS, raise_for_status=True
-        ) as client:
-        tasks = [
-            _json_fetcher(client, q)
-            for q in queries
-        ]
-        gat = asyncio.gather(*tasks)
-        try:
-            res = await gat
-        except:
-            gat.cancel()
-            raise
-    return res
-
-async def _json_fetcher(client, query):
-    async with _sem:
-        await asyncio.sleep(random.random() * 0.7 + 0.3, loop=_loop)
-        async with client.get(RANKING, params=query) as resp:
-            text = await resp.text()
-    return text
 
 async def _spotlight_fetcher(feature):
     query = {"article_id": feature}
@@ -390,35 +389,18 @@ async def _spotlight_fetcher(feature):
             text = await resp.text()
     return text
 
-async def _spotlight_list_dispatcher(article_num, pages):
+async def _query_dispatcher(
+        url, queries, *, headers=dict()
+    ):
+    """ Launching concurrent queries with given headers. """
     #   if page is out of range, received article will less than article_num.
     texts = []
-    #   make "header_set"?
-    headers = {
-        "Host": "www.pixiv.net",
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:62.0) "
-            "Gecko/20100101 Firefox/62.0"
-        ),
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "Accept-Language": "zh-TW,en-US;q=0.7,en;q=0.3",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Referer": "https://www.pixiv.net/showcase/",
-    }
-
-    url = (
-        "https://www.pixiv.net/ajax/showcase/latest"
-    )
-    queries = [
-        {"page": i, "article_num": article_num}
-        for i in range(1, pages+1)
-    ]
     async with aiohttp.ClientSession(
             loop=_loop, headers=headers
         ) as client:
         try:
             tasks = [
-                _showcase_list_fetcher(client, url, q)
+                _query_fetcher(client, url, q)
                 for q in queries
             ]
             gat = asyncio.gather(*tasks, loop=_loop)
@@ -428,7 +410,7 @@ async def _spotlight_list_dispatcher(article_num, pages):
             raise
     return texts
 
-async def _showcase_list_fetcher(client, url, query):
+async def _query_fetcher(client, url, query):
     async with _sem:
         await asyncio.sleep(random.random() * 0.7 + 0.3, loop=_loop)
         async with client.get(url, params=query) as resp:
