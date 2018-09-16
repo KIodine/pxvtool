@@ -88,17 +88,17 @@ ILLUST_ATTRS = [
     "yes_rank"
 ]
 COMMON_EXTS = ["jpg", "png", "gif", "bmp", "zip"]
-REFERER = (
+RANKING_REFERER = (
     "https://www.pixiv.net/member_illust.php?"
     "mode=medium&illust_id="
 )
-USER_AGENT = (
+_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/63.0.3239.132 Safari/537.36"
 )
 PREFORGE_HEADERS = {
-    "User-Agent": USER_AGENT,
+    "User-Agent": _USER_AGENT,
 }
 
 #   Too many concurrent connection may cause you cut from server.
@@ -243,6 +243,31 @@ def _make_sample_url(meta, ext):
 
 
 def fetch_ranking_info(date="", mode="daily", content="", pages=-1):
+    """
+    Fetch daily(or other period) ranking info.
+
+    Args:
+        date        string
+            Date represented in form of YYYYMMDD.
+        mode        string
+            See "AVAILABLE_MODES".
+        content     string
+            See "AVAILABLE_CONTENTS".
+        pages       int
+            If page == -1, fetches all page, otherwise follows input param.
+            For the maximum page available, see "MODE_PAGES".
+            Illust per page is 50.
+
+    Returns:
+        dict from deserialized json, contains infos about ranking illusts.
+    
+    Raises:
+        ValueError
+            User input an invalid date, that is, a date latter than most recent
+            published ranking. *See ranking publish rule.
+        Any type of connection error.
+            --
+    """
     content = dict()
     if not date:
         date = _make_most_recent_date()
@@ -262,6 +287,19 @@ def fetch_ranking_info(date="", mode="daily", content="", pages=-1):
     return content
 
 def fetch_spotlight_info(feature):
+    """
+    Fetch spotlight info.
+
+    Args:
+        feature     int
+            Spotlight code represented in url, should be a 4-digits number.
+    
+    Returns:
+        dict from deserialized json, contains infos about spotlight illusts.
+    
+    Raises:
+        Any type of connnection error.
+    """
     content = dict()
     pxlog.info(f"Start fetching spotlight {feature} info")
     text = _loop.run_until_complete(
@@ -272,6 +310,21 @@ def fetch_spotlight_info(feature):
     return content
 
 def fetch_spotlight_list(article_num=17, pages=1):
+    """
+    Fetch list of published spotlight.
+
+    Args:
+        article_num     int
+            Number of spotlight metadata per queried page.
+        pages           int
+            Number of queried page.
+    
+    Returns:
+        dict from deserialized json, contains spotlight metadatas.
+    
+    Raises:
+        Any type of connection error.
+    """
     content = dict()
     pxlog.info(
         "Start fetching spotlight list {}/page (total: {})".format(
@@ -279,7 +332,7 @@ def fetch_spotlight_list(article_num=17, pages=1):
         )
     )
     #   Add a global header_set?
-    headers = {
+    spotlight_headers = {
         "Host": "www.pixiv.net",
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:62.0) "
@@ -296,9 +349,13 @@ def fetch_spotlight_list(article_num=17, pages=1):
     ]
 
     texts = _loop.run_until_complete(
-        _query_dispatcher(SPOTLIGHT_QUERY_URL, queries, headers=headers)
+        _query_dispatcher(
+            SPOTLIGHT_QUERY_URL, queries, headers=spotlight_headers
+        )
     )
     
+    #   More generalized "_merge_json"?
+    #   Use "operator.itemgetter".
     for t in texts:
         if content:
             content["body"].extend(
@@ -317,6 +374,25 @@ def download_spotlight(
         *,
         savedir=DEFAULT_SAVEDIR, dirname=""
     ):
+    """
+    Download spotlight illusts with given feature code.
+
+    Args:
+        feature     int
+            Spotlight code represented in url, should be a 4-digits number.
+        savedir     string
+            Directory of illust to place.
+        dirname     string
+            Directory name containing illusts.
+    
+    Returns:
+        list of integer, indicated downloaded bytes.
+    
+    Raises:
+        aiohttp.ServerDisconnectedError
+            Too much concurrent connection or dense request 
+            may result in this error.
+    """
     #   Add more options:   savedir, dirname
     content = fetch_spotlight_info(feature)
     #   Forging save path.
@@ -327,6 +403,25 @@ def download_spotlight(
     return _download("spotlight", metadatas, fullpath)
 
 def filter_content(contents, rules, mode=any):
+    """
+    Filter contents by given rule.
+
+    Args:
+        contents    list
+            List of illust, the content may vary from source to source.
+            Besure you know the data hierachy of object.
+        rules       list
+            A list of function takes one content and returns boolean value,
+            indicating the content is selected.
+        mode        `any` or `all`
+            Choose wether satisfy all rules or any of them.
+    
+    Returns:
+        list of filtered contents.
+    
+    Raises:
+        None
+    """
     if not (mode in (any, all)):
         raise ValueError("Accept only one of 'any' or 'all'.")
     res = []
@@ -340,6 +435,37 @@ def download_ranking(
         *,
         savedir=DEFAULT_SAVEDIR, dirname=""
     ):
+    """
+    Download ranking illusts.
+
+    Args:
+        date        string
+            Date represented in form of YYYYMMDD.
+        mode        string
+            See "AVAILABLE_MODES".
+        content     string
+            See "AVAILABLE_CONTENTS".
+        pages       int
+            If page == -1, fetches all page, otherwise follows input param.
+            For the maximum page available, see "MODE_PAGES".
+            Illust per page is 50.
+        targets     list
+            list of illust_id, which is an integer.
+            Illust_id is a 8-digits natural number that strictly growing up,
+            could up to 9-digits in the future.
+        savedir     string
+            Directory of illust to place.
+        dirname     string
+            Directory name containing illusts.
+    
+    Returns:
+        list of integer, indicated downloaded bytes.
+    
+    Raises:
+        aiohttp.ServerDisconnectedError
+            Too much concurrent connection or dense request 
+            may result in this error.
+    """
     js = fetch_ranking_info(date, mode, content, pages)
     #   Forging save path.
     if not date:
@@ -354,6 +480,26 @@ def download_ranking(
     return _download("ranking", metadatas, fullpath)
 
 def _download(taskname, metadatas, fullpath):
+    """
+    Core function of launching concurrent tasks.
+    
+    Args:
+        taskname    string
+            Name for logging.
+        metadatas   `IllustMeta`
+            Processed metadata, extracted from ranking info or spotlight info.
+            Should only generated by '_make_illust_meta'.
+        fullpath    string
+            Path of a directory, saving downloaded images.
+    
+    Returns:
+        list of integer, indicates bytes downloaded.
+    
+    Raises:
+        aiohttp.ServerDisconnectedError
+            Too much concurrent connection or dense request 
+            may result in this error.
+    """
     start = time.perf_counter()
     pxlog.info("Start download illusts")
 
@@ -451,7 +597,7 @@ async def _ext_fetcher(client, metadata):
     return res
 
 async def _ext_core(client, metadata):
-    header = {"referer": REFERER}
+    header = {"referer": RANKING_REFERER}
     pxlog.debug("Trying {}".format(metadata.illust_id))
     if metadata.illust_type == IllustType.UGOIRA:
         return _make_derived_fields(metadata, 'zip')
@@ -499,7 +645,7 @@ async def _dl_core(client, derived, dirname):
     start = time.perf_counter()
     elapsed = 0
     size = 0
-    header = {"referer": REFERER}
+    header = {"referer": RANKING_REFERER}
 
     target_url = derived.url
     fname = derived.illust_id + f".{derived.format}"
@@ -620,6 +766,19 @@ def _filter_by_condition(contents, *conditions):
     return ok
 
 def byte2human(b):
+    """
+    Convert byte to human-readable representation.
+    
+    Args:
+        b       int
+            Bytes
+    
+    Returns:
+        string of byte in human-readable representation.
+    
+    Raises:
+        None
+    """
     unit_suffix = [
         "", "K", "M", "G", "T", "P", "E", "Z", "Y"
     ]

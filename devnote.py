@@ -7,8 +7,8 @@
 #---------------------------------------------------------------------------#
 #   Improve Proposals                                                       #
 #---------------------------------------------------------------------------#
-#   New function                                                            #
-#       fetch_spotlight_list:                                               #
+#   Add ranking publish rule description.                                   #
+#       --                                                                  #
 #                                                                           #
 #   Modify "_json_fetcher/_json_dispatcher" for more general purpose        #
 #       -no further description-                                            #
@@ -19,9 +19,6 @@
 #                                                                           #
 #   Use enum to replace string mode selection                               #
 #       Providing mode listing and lint compatibility.                      #
-#                                                                           #
-#   Move enum class to the top of code                                      #
-#       --no further description--                                          #
 #---------------------------------------------------------------------------#
 
 #---------------------------------------------------------------------------#
