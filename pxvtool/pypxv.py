@@ -44,8 +44,8 @@ class HTTPStatus(enum.IntEnum):
 
 
 RANKING_URL = "https://www.pixiv.net/ranking.php"
-SPOTLIGHT = "https://www.pixiv.net/ajax/showcase/article"
-SPOTLIGHT_QUERY_URL = "https://www.pixiv.net/ajax/showcase/latest"
+SPOTLIGHT_MAIN_URL = "https://www.pixiv.net/ajax/showcase/article"
+SPOTLIGHT_QUERYLIST_URL = "https://www.pixiv.net/ajax/showcase/latest"
 
 UGOIRA_META_template = "https://www.pixiv.net/ajax/illust/{:8d}/ugoira_meta"
 
@@ -97,8 +97,19 @@ _USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/63.0.3239.132 Safari/537.36"
 )
-PREFORGE_HEADERS = {
+CAMOUFLAGE_HEADERS = {
     "User-Agent": _USER_AGENT,
+}
+SPOTLIGHT_LIST_HEADERS = {
+    "Host": "www.pixiv.net",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:62.0) "
+        "Gecko/20100101 Firefox/62.0"
+    ),
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "zh-TW,en-US;q=0.7,en;q=0.3",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://www.pixiv.net/showcase/",
 }
 
 #   Too many concurrent connection may cause you cut from server.
@@ -126,7 +137,7 @@ _pxvroot.addHandler(_file_hdl)
 
 pxlog = _pxvroot    #   Alias
 
-
+#   A better name?
 _thumbnail_suffix = r"p0_master1200\..*"
 _thumbnail_suffix_sc = r"master1200\..*"
 _thumbnail_middle = r"c/\d+x\d+(_\d*)?/img-master"
@@ -268,7 +279,6 @@ def fetch_ranking_info(date="", mode="daily", content="", pages=-1):
         Any type of connection error.
             --
     """
-    content = dict()
     if not date:
         date = _make_most_recent_date()
     else:
@@ -279,12 +289,14 @@ def fetch_ranking_info(date="", mode="daily", content="", pages=-1):
     )
     pxlog.info(f"Start fetching ranking {date} info")
     coro = _query_dispatcher(
-        RANKING_URL, queries, headers=PREFORGE_HEADERS
+        RANKING_URL, queries, headers=CAMOUFLAGE_HEADERS
     )
     texts = _loop.run_until_complete(coro)
-    content = _merge_json(texts)
+    #   Stupid way solving name conflict.
+    jscontent = _merge_json(texts)
+
     pxlog.info("Fetching ranking info ok")
-    return content
+    return jscontent
 
 def fetch_spotlight_info(feature):
     """
@@ -331,18 +343,6 @@ def fetch_spotlight_list(article_num=17, pages=1):
             article_num, article_num * pages
         )
     )
-    #   Add a global header_set?
-    spotlight_headers = {
-        "Host": "www.pixiv.net",
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:62.0) "
-            "Gecko/20100101 Firefox/62.0"
-        ),
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "Accept-Language": "zh-TW,en-US;q=0.7,en;q=0.3",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Referer": "https://www.pixiv.net/showcase/",
-    }
     queries = [
         {"page": i, "article_num": article_num}
         for i in range(1, pages+1)
@@ -350,7 +350,7 @@ def fetch_spotlight_list(article_num=17, pages=1):
 
     texts = _loop.run_until_complete(
         _query_dispatcher(
-            SPOTLIGHT_QUERY_URL, queries, headers=spotlight_headers
+            SPOTLIGHT_QUERYLIST_URL, queries, headers=SPOTLIGHT_LIST_HEADERS
         )
     )
     
@@ -526,13 +526,15 @@ def _download(taskname, metadatas, fullpath):
 
 
 async def _spotlight_fetcher(feature):
+    #   TODO hard-coded constant?
     query = {"article_id": feature}
     text = str()
     async with aiohttp.ClientSession(
-            loop=_loop, headers=PREFORGE_HEADERS, raise_for_status=True
+            loop=_loop, headers=CAMOUFLAGE_HEADERS, raise_for_status=True
         ) as client:
-        async with client.get(SPOTLIGHT, params=query) as resp:
+        async with client.get(SPOTLIGHT_MAIN_URL, params=query) as resp:
             text = await resp.text()
+
     return text
 
 async def _query_dispatcher(
@@ -566,8 +568,9 @@ async def _query_fetcher(client, url, query):
 async def _chaining(metadatas, dirname):
     if not os.path.exists(dirname):
         os.makedirs(dirname)
+    #   This layer intends to reuse session, but does it really works?
     async with aiohttp.ClientSession(
-            loop=_loop, headers=PREFORGE_HEADERS
+            loop=_loop, headers=CAMOUFLAGE_HEADERS
         ) as client:
         #   Not using raise for status, status is necessary in judging
         #   file extensions.
@@ -585,8 +588,10 @@ async def _ext_dispatcher(client, metadatas):
     try:
         res = await gat
     except:
+        #   Cancel once error occurs, purge pending tasks.
         gat.cancel()
         raise
+    #   Unwind nested list.
     res = [i for each in res for i in each]
     pxlog.debug("Tried {} files".format(len(res)))
     return res
@@ -597,8 +602,10 @@ async def _ext_fetcher(client, metadata):
     return res
 
 async def _ext_core(client, metadata):
+    #   If a file ext is not found, return enpty list.
     header = {"referer": RANKING_REFERER}
     pxlog.debug("Trying {}".format(metadata.illust_id))
+    #   The file ext of type UGOIRA is determined.
     if metadata.illust_type == IllustType.UGOIRA:
         return _make_derived_fields(metadata, 'zip')
     for ext in COMMON_EXTS:
@@ -617,7 +624,9 @@ async def _ext_core(client, metadata):
                 )
             pass
         pass
-    #   return empty list for not hit.
+    #   Prompt for not found.
+    #   Return empty list for not hit.
+    pxlog.info("{} extension not found".format(metadata.illust_id))
     return []
 
 async def _dl_dispatcher(client, deriveds, dirname):
@@ -635,6 +644,7 @@ async def _dl_dispatcher(client, deriveds, dirname):
     return res
 
 async def _dl_fetcher(client, derived, dirname):
+    #   Simple layer to save indent.
     async with _sem:
         await asyncio.sleep(random.random()*2 + 0.3)
         res = await _dl_core(client, derived, dirname)
@@ -789,5 +799,5 @@ def byte2human(b):
         mag = 0
     if mag > 8:
         mag=8
-    expr = f"{b/(1024**mag):7.3f} {unit_suffix[mag]}B"
+    expr = f"{b/(1024**mag):8.3f} {unit_suffix[mag]}B"
     return expr

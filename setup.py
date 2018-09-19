@@ -6,7 +6,7 @@ Pixiv ranking and spotlight download tool.\
 
 setup(
     name="pxvtool",
-    version="1.1.0",
+    version="1.1.1",
     description=desc,
     author="KIodine",
     license="MIT",
