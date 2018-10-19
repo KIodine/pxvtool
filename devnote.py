@@ -10,9 +10,6 @@
 #   Add ranking publish rule description.                                   #
 #       --                                                                  #
 #                                                                           #
-#   Modify "_json_fetcher/_json_dispatcher" for more general purpose        #
-#       -no further description-                                            #
-#                                                                           #
 #   Flexible logger                                                         #
 #       add filehandler and remove with                                     #
 #       'logger.removeHandler'.                                             #
@@ -22,18 +19,24 @@
 #---------------------------------------------------------------------------#
 
 #---------------------------------------------------------------------------#
-#   Progress:                                                               #
+#   Login required functions                                                #
+#       Requires login cookies to verify, otherwise raises HTTPS 401 Error. #
+#       Once cookie is acquired, no further html parsing is needed.         #
 #---------------------------------------------------------------------------#
-#   180822:                                                                 #
-#       Complete metadata fetching, not tested.                             #
-#       Metadata parser test complete.                                      #
-#       Complete download function, not tested.                             #
-#       Download functions test complete.                                   #
+#   General illust:                                                         #
+#       https://www.pixiv.net/ajax/illust/<illust_id>                       #
+#   Ugoira metadata:                                                        #
+#       https://www.pixiv.net/ajax/illust/<ugoira_id>/ugoira_meta           #
+#---------------------------------------------------------------------------#
+#   Pixiv login requires a "post_key" hidden inside login page.             #
+#   A global dictionary recording opened session?                           #
 #---------------------------------------------------------------------------#
 
 #---------------------------------------------------------------------------#
-#   Tests                                                                   #
+#   A class for simple encapsulation?                                       #
+#   Just simply collect functions than seperating namespaces.               #
 #---------------------------------------------------------------------------#
-#   metadata parser test ok                                                 #
-#   download test ok                                                        #
+
+#---------------------------------------------------------------------------#
+#   An extra typehint file?                                                 #
 #---------------------------------------------------------------------------#
