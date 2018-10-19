@@ -112,9 +112,9 @@ SPOTLIGHT_LIST_HEADERS = {
     "Referer": "https://www.pixiv.net/showcase/",
 }
 
-#   Too many concurrent connection may cause you cut from server.
-#   This value is safe for now.
-SEM_LIMIT = 5
+# The concurrent level of connection.
+# Too many concurrent connection may cause you cut from server.
+SEM_LIMIT = 4
 
 _logstrfmt = "{asctime}|{name}|{levelname:^7s}| {message}"
 _logtimefmt = "%H:%M:%S"
@@ -164,6 +164,11 @@ _origin_suf = {
 _loop = asyncio.get_event_loop()
 _sem = asyncio.Semaphore(SEM_LIMIT)
 
+
+# Use "TCPConnector" instead of semaphore and delay?
+# Pixiv limits either concurrent connections or connection interval?
+
+
 #---------------------------------------------------------------------------#
 #   NOTE                                                                    #
 #       Since all 3 types of illust will turn into the same intermediate    #
@@ -211,7 +216,13 @@ def _make_illust_meta(content):
         url = content["url"]["768x1200"]
     else:
         url = content["url"]
-
+    #   url pattern
+    # https://i.pximg.net/img-master/img/YYYY/mm/dd/HH/MM/SS/\d+_p\d+_master1200.jpg
+    #                                    ^~~~~~~~~~~~~~~~~~~ Upload time.
+    #                          The main difference for every image.
+    #   In other words, when "illust_id", "illust_page_count",
+    #   "illust_type" and "url" is satisfied, this image is sufficient for 
+    #   download.
     pat_mid, pat_suf = _pattern_table[illust_type]
 
     #   These name may somehow confusing.
@@ -247,6 +258,42 @@ def _make_sample_url(meta, ext):
     sample += f".{ext}"
     return sample
 
+def _tear_down(origin_url, pages=1):
+    """ Tear down original url for code compatibility.
+
+    Args:
+        origin_url      `str`
+            The original url of image.
+        pages           `int`
+            Page count of illust
+    
+    Returns:
+        `list`[`IllustDerived`]
+            Derived field from illust metadata.
+    
+    Raises:
+        `None`
+    """
+    template = re.sub(
+        r"_p\d+", r"_p{page}", origin_url
+    )
+    m = re.search(
+        r"(?P<illust_id>\d+)_p\d+\.(?P<format>\w+)",
+        origin_url
+    )
+    
+    iid = m.group("illust_id")
+    fmt = m.group("format")
+    deriveds = list(
+        map(
+            lambda args: NewIllustDerived(*args),
+            (
+                (iid, template.format(page=i), fmt)
+                for i in range(pages)
+            )
+        )
+    )
+    return deriveds
 
 #---------------------------------------------------------------------------#
 #   Exposed APIs                                                            #
@@ -258,13 +305,13 @@ def fetch_ranking_info(date="", mode="daily", content="", pages=-1):
     Fetch daily(or other period) ranking info.
 
     Args:
-        date        string
+        date        `str`
             Date represented in form of YYYYMMDD.
-        mode        string
+        mode        `str`
             See "AVAILABLE_MODES".
-        content     string
+        content     `str`
             See "AVAILABLE_CONTENTS".
-        pages       int
+        pages       `int`
             If page == -1, fetches all page, otherwise follows input param.
             For the maximum page available, see "MODE_PAGES".
             Illust per page is 50.
@@ -287,15 +334,20 @@ def fetch_ranking_info(date="", mode="daily", content="", pages=-1):
     queries = _make_query(
         date, mode, content, pages
     )
+
     pxlog.info(f"Start fetching ranking {date} info")
     coro = _query_dispatcher(
         RANKING_URL, queries, headers=CAMOUFLAGE_HEADERS
     )
-    texts = _loop.run_until_complete(coro)
-    #   Stupid way solving name conflict.
-    jscontent = _merge_json(texts)
-
     pxlog.info("Fetching ranking info ok")
+    
+    texts = _loop.run_until_complete(coro)
+    # jscontent = _merge_json(texts)
+    jscontent = _merge_json(
+        texts,
+        merge_key=lambda x: x["contents"],
+        sort_key=lambda x: x["rank"]
+    )
     return jscontent
 
 def fetch_spotlight_info(feature):
@@ -303,7 +355,7 @@ def fetch_spotlight_info(feature):
     Fetch spotlight info.
 
     Args:
-        feature     int
+        feature     `int`
             Spotlight code represented in url, should be a 4-digits number.
     
     Returns:
@@ -314,11 +366,19 @@ def fetch_spotlight_info(feature):
     """
     content = dict()
     pxlog.info(f"Start fetching spotlight {feature} info")
-    text = _loop.run_until_complete(
-        _spotlight_fetcher(feature)
+    queries = [
+        {"article_id": feature},    #   Only one query param.
+    ]
+    #   New wrapper avoiding expose `_loop` like `_query`?
+    coro = _query_dispatcher(
+        SPOTLIGHT_MAIN_URL, queries, headers=CAMOUFLAGE_HEADERS
     )
-    content = json.loads(text, encoding="utf-8")
+    texts = _loop.run_until_complete(
+        coro
+    )
+    #   Should return only one result.
     pxlog.info("Fetching spotlight info ok")
+    content = json.loads(texts[0], encoding="utf-8")
     return content
 
 def fetch_spotlight_list(article_num=17, pages=1):
@@ -326,9 +386,9 @@ def fetch_spotlight_list(article_num=17, pages=1):
     Fetch list of published spotlight.
 
     Args:
-        article_num     int
+        article_num     `int`
             Number of spotlight metadata per queried page.
-        pages           int
+        pages           `int`
             Number of queried page.
     
     Returns:
@@ -355,15 +415,11 @@ def fetch_spotlight_list(article_num=17, pages=1):
     )
     
     #   More generalized "_merge_json"?
-    #   Use "operator.itemgetter".
-    for t in texts:
-        if content:
-            content["body"].extend(
-                json.loads(t, encodong="utf-8")["body"]
-            )
-        else:
-            content = json.loads(t, encoding="utf-8")
-
+    content = _merge_json(
+        texts,
+        merge_key=lambda x: x["body"],
+        sort_key=None
+    )
     pxlog.info(
         "Fetch spotlight list info ok"
     )
@@ -378,11 +434,11 @@ def download_spotlight(
     Download spotlight illusts with given feature code.
 
     Args:
-        feature     int
+        feature     `int`
             Spotlight code represented in url, should be a 4-digits number.
-        savedir     string
+        savedir     `str`
             Directory of illust to place.
-        dirname     string
+        dirname     `str`
             Directory name containing illusts.
     
     Returns:
@@ -394,12 +450,14 @@ def download_spotlight(
             may result in this error.
     """
     #   Add more options:   savedir, dirname
-    content = fetch_spotlight_info(feature)
+    js = fetch_spotlight_info(feature)
+    if js["error"]:
+        raise Exception(js["message"])
     #   Forging save path.
     if not dirname:
         dirname = "Spotlight_{feature}".format(feature=feature)
     fullpath = os.path.join(savedir, dirname)
-    metadatas = list(map(_make_illust_meta, content["body"][0]["illusts"]))
+    metadatas = list(map(_make_illust_meta, js["body"][0]["illusts"]))
     return _download("spotlight", metadatas, fullpath)
 
 def filter_content(contents, rules, mode=any):
@@ -407,10 +465,10 @@ def filter_content(contents, rules, mode=any):
     Filter contents by given rule.
 
     Args:
-        contents    list
+        contents    `list`
             List of illust, the content may vary from source to source.
             Besure you know the data hierachy of object.
-        rules       list
+        rules       `list`
             A list of function takes one content and returns boolean value,
             indicating the content is selected.
         mode        `any` or `all`
@@ -439,23 +497,23 @@ def download_ranking(
     Download ranking illusts.
 
     Args:
-        date        string
+        date        `str`
             Date represented in form of YYYYMMDD.
-        mode        string
+        mode        `str`
             See "AVAILABLE_MODES".
-        content     string
+        content     `str`
             See "AVAILABLE_CONTENTS".
-        pages       int
+        pages       `int`
             If page == -1, fetches all page, otherwise follows input param.
             For the maximum page available, see "MODE_PAGES".
             Illust per page is 50.
-        targets     list
+        targets     `list`[`int`]
             list of illust_id, which is an integer.
             Illust_id is a 8-digits natural number that strictly growing up,
             could up to 9-digits in the future.
-        savedir     string
+        savedir     `str`
             Directory of illust to place.
-        dirname     string
+        dirname     `str`
             Directory name containing illusts.
     
     Returns:
@@ -467,6 +525,8 @@ def download_ranking(
             may result in this error.
     """
     js = fetch_ranking_info(date, mode, content, pages)
+    if js["error"]:
+        raise Exception(js["message"])
     #   Forging save path.
     if not date:
         date = js["date"]
@@ -479,9 +539,20 @@ def download_ranking(
     metadatas = list(map(_make_illust_meta, ok))
     return _download("ranking", metadatas, fullpath)
 
+def download_illust(
+        *illust_id,
+        savedir=DEFAULT_SAVEDIR, dirname=""
+    ):
+    #   
+    #   This function requires login, there should be a better place rather
+    #   than raw expose.
+    #   Make query -> tear_down -> call async download
+    #   Async query? -> cookie persistency?
+    raise NotImplementedError
+
 def _download(taskname, metadatas, fullpath):
     """
-    Core function of launching concurrent tasks.
+    Core function for launching concurrent tasks.
     
     Args:
         taskname    string
@@ -525,26 +596,15 @@ def _download(taskname, metadatas, fullpath):
 #---------------------------------------------------------------------------#
 
 
-async def _spotlight_fetcher(feature):
-    #   TODO hard-coded constant?
-    query = {"article_id": feature}
-    text = str()
-    async with aiohttp.ClientSession(
-            loop=_loop, headers=CAMOUFLAGE_HEADERS, raise_for_status=True
-        ) as client:
-        async with client.get(SPOTLIGHT_MAIN_URL, params=query) as resp:
-            text = await resp.text()
-
-    return text
-
 async def _query_dispatcher(
         url, queries, *, headers=dict()
     ):
     """ Launching concurrent queries with given headers. """
     #   if page is out of range, received article will less than article_num.
+    _tcpconn = aiohttp.TCPConnector(limit=SEM_LIMIT, loop=_loop)
     texts = []
     async with aiohttp.ClientSession(
-            loop=_loop, headers=headers
+            loop=_loop, headers=headers, connector=_tcpconn
         ) as client:
         try:
             tasks = [
@@ -560,26 +620,27 @@ async def _query_dispatcher(
 
 async def _query_fetcher(client, url, query):
     async with _sem:
-        await asyncio.sleep(random.random() * 0.7 + 0.3, loop=_loop)
+        # await asyncio.sleep(random.random() * 0.7 + 0.3, loop=_loop)
         async with client.get(url, params=query) as resp:
             text = await resp.text()
     return text
 
 async def _chaining(metadatas, dirname):
+    _tcpconn = aiohttp.TCPConnector(limit=SEM_LIMIT, loop=_loop)
     if not os.path.exists(dirname):
         os.makedirs(dirname)
-    #   This layer intends to reuse session, but does it really works?
+    # This layer intends to reuse session, but does it really works?
     async with aiohttp.ClientSession(
-            loop=_loop, headers=CAMOUFLAGE_HEADERS
+            loop=_loop, headers=CAMOUFLAGE_HEADERS, connector=_tcpconn
         ) as client:
-        #   Not using raise for status, status is necessary in judging
-        #   file extensions.
+        # Not using raise for status, status is necessary in judging
+        # file extensions.
         approved = await _ext_dispatcher(client, metadatas)
         downloaded = await _dl_dispatcher(client, approved, dirname)
     return downloaded
 
 async def _ext_dispatcher(client, metadatas):
-    pxlog.debug("Start trying file exts")
+    pxlog.info("Start trying file exts")
     tasks = [
         _loop.create_task(_ext_fetcher(client, m))
         for m in metadatas
@@ -588,10 +649,10 @@ async def _ext_dispatcher(client, metadatas):
     try:
         res = await gat
     except:
-        #   Cancel once error occurs, purge pending tasks.
+        # Cancel once error occurs, purge pending tasks.
         gat.cancel()
         raise
-    #   Unwind nested list.
+    # Unwind nested list.
     res = [i for each in res for i in each]
     pxlog.debug("Tried {} files".format(len(res)))
     return res
@@ -609,7 +670,7 @@ async def _ext_core(client, metadata):
     if metadata.illust_type == IllustType.UGOIRA:
         return _make_derived_fields(metadata, 'zip')
     for ext in COMMON_EXTS:
-        await asyncio.sleep(random.random()*2 + 0.3, loop=_loop)
+        # await asyncio.sleep(random.random()*2 + 0.3, loop=_loop)
         sample_url = _make_sample_url(metadata, ext)
         async with client.head(sample_url, headers=header) as resp:
             status = resp.status
@@ -646,7 +707,7 @@ async def _dl_dispatcher(client, deriveds, dirname):
 async def _dl_fetcher(client, derived, dirname):
     #   Simple layer to save indent.
     async with _sem:
-        await asyncio.sleep(random.random()*2 + 0.3)
+        # await asyncio.sleep(random.random()*2 + 0.3)
         res = await _dl_core(client, derived, dirname)
     return res
 
@@ -739,24 +800,26 @@ def _make_most_recent_date():
     date = local_now - datetime.timedelta(days=delta)
     return date.strftime("%Y%m%d")
 
-def _merge_json(texts):
-    dict_content = dict()
+def _merge_json(
+        texts,
+        merge_key=lambda x: x["contents"],
+        sort_key=lambda x: x["rank"]
+    ):
+    content = dict()
+    tempjs = dict()
     for t in texts:
-        if dict_content:
-            dict_content["contents"].extend(
-                json.loads(t, encoding="utf-8")["contents"]
+        if content:
+            tempjs = json.loads(t, encoding="utf-8")
+            if not merge_key:
+                break
+            merge_key(content).extend(
+                merge_key(tempjs)
             )
         else:
-            dict_content = json.loads(t, encoding="utf-8")
-    dict_content["contents"].sort(key=lambda x: x["rank"])
-    return dict_content
-
-def _is_ugoira(content) -> bool:
-    return content["illust_type"] == IllustType.UGOIRA
-
-def _is_illust_fresh(content) -> bool:
-    yes_rank = content["yes_rank"]
-    return yes_rank <= 0 or yes_rank > 500
+            content = json.loads(t, encoding="utf-8")
+    if sort_key:
+        merge_key(content).sort(key=sort_key)
+    return content
 
 def _filter_by_name(contents, targets):
     id_set = set(targets)

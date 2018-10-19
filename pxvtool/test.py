@@ -41,3 +41,14 @@ for c, ext in zip(test_contents, ext):
     print(sampleurl)
     testderived = pypxv._make_derived_fields(testmeta, ext)
     print('\n'.join(map(str, testderived)))
+
+false_content = pypxv._make_false_content(
+    "https://i.pximg.net/img-master/img/2018/09/27/14/49/24/70898131_p0_master1200.jpg",
+)
+print(false_content)
+testmeta = pypxv._make_illust_meta(false_content)
+print(testmeta)
+sampleurl = pypxv._make_sample_url(testmeta, "jpg")
+print(sampleurl)
+testderived = pypxv._make_derived_fields(testmeta, "jpg")
+print("\n".join(map(str, testderived)))
